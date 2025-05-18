@@ -11,14 +11,29 @@
 static const char *TAG = "LVGL_SETUP";
 static void lvgl_timer_task(void *arg);
 
+static lv_obj_t *meter;
 static lv_obj_t *ui_Screen1;
 static lv_obj_t *ui_redsquare;
 
-static lv_obj_t *meter;
 static lv_obj_t *ue_img_logo;
 static lv_obj_t *esp_img_logo;
 
 static lv_obj_t *ui_Dropdown2;
+
+lv_obj_t *meter_weight, *meter_time;
+lv_meter_indicator_t *indic_weight, *indic_acceptance_band;
+
+extern int weight_lwr_band;
+extern int weight_upr_band;
+extern int weight_scale_max;
+//extern uint16_t weight_ticks;
+
+lv_obj_t *weight_label;
+lv_obj_t *countdown_label;
+lv_obj_t *state_label;
+lv_obj_t *info_panel;
+
+
 
 LV_IMG_DECLARE(ue_logo)
 LV_IMG_DECLARE(esp_logo)
@@ -28,6 +43,8 @@ LV_IMG_DECLARE(red_square)
 
 static SemaphoreHandle_t lvgl_mux;  // LVGL mutex
 static SemaphoreHandle_t touch_mux; // Touch mutex
+
+
 
 static void bsp_touchpad_read(lv_indev_drv_t *drv, lv_indev_data_t *data)
 {
@@ -70,7 +87,7 @@ static void touch_callback(esp_lcd_touch_handle_t tp)
 
 static void set_value(void *indic, int32_t v)
 {
-    lv_meter_set_indicator_end_value(meter, indic, v);
+    lv_meter_set_indicator_end_value(meter_weight, indic, v);
 }
 
 static bool example_notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
@@ -300,6 +317,7 @@ void lvgl_setup()
     BSP_NULL_CHECK(indev_touchpad, ESP_ERR_NO_MEM);
 #endif
 
+
     xTaskCreatePinnedToCore(lvgl_timer_task, "lvgl Timer", 10000, NULL, 4, NULL, 1);
 }
 
@@ -311,9 +329,9 @@ static void lvgl_timer_task(void *arg)
         bsp_display_lock(0);
         uint32_t task_delay_ms = lv_timer_handler();
         bsp_display_unlock();
-        if (task_delay_ms > 500)
+        if (task_delay_ms > 250)
         {
-            task_delay_ms = 500;
+            task_delay_ms = 250;
         }
         else if (task_delay_ms < 5)
         {
@@ -336,7 +354,7 @@ void display_meter()
     lv_meter_scale_t *scale = lv_meter_add_scale(meter);
     lv_meter_set_scale_ticks(meter, scale, 11, 2, 10, lv_palette_main(LV_PALETTE_GREY));
     lv_meter_set_scale_major_ticks(meter, scale, 1, 2, 15, lv_color_hex3(0xeee), 10);
-    lv_meter_set_scale_range(meter, scale, 0, 100, 270, 90);
+    lv_meter_set_scale_range(meter, scale, 0, 120, 270, 90);
 
     /*Add a three arc indicator*/
     lv_meter_indicator_t *indic1 = lv_meter_add_arc(meter, scale, 10, lv_color_hex3(0x00F), 0);
@@ -480,4 +498,52 @@ void bsp_display_unlock(void)
 {
     BSP_NULL_CHECK(lvgl_mux, NULL);
     xSemaphoreGive(lvgl_mux);
+}
+
+void build_display()
+{
+    // screen dimension is 240(V) X 536(H)
+
+    meter_weight = lv_meter_create(lv_scr_act());
+    lv_obj_center(meter_weight);
+    lv_obj_set_align(meter_weight, LV_ALIGN_LEFT_MID);
+    lv_obj_set_size(meter_weight, 170, 170);
+
+    /*Remove the circle from the middle*/
+    lv_obj_remove_style(meter_weight, NULL, LV_PART_INDICATOR);
+
+    /*Add a scale first*/
+    lv_meter_scale_t *scale = lv_meter_add_scale(meter_weight);
+    lv_meter_set_scale_ticks(meter_weight, scale, 8, 2, 10, lv_palette_main(LV_PALETTE_GREY));
+    lv_meter_set_scale_major_ticks(meter_weight, scale, 1, 2, 15, lv_color_hex3(0xeee), 15);
+    lv_meter_set_scale_range(meter_weight, scale, 0, weight_scale_max, 225, 90);
+
+    indic_weight = lv_meter_add_arc(meter_weight, scale, 10, lv_color_hex3(0x00F), 0);
+    indic_weight->start_value = 0;
+    indic_weight->end_value = 40.0;
+
+    indic_acceptance_band = lv_meter_add_arc(meter_weight, scale, 10, lv_color_hex3(0xF00),-10);
+    indic_acceptance_band->start_value = weight_lwr_band;
+    indic_acceptance_band->end_value = weight_upr_band;
+
+    weight_label = lv_label_create(lv_scr_act());
+    lv_obj_set_style_text_font(weight_label, &lv_font_montserrat_24, 0);
+    lv_obj_align_to(weight_label, meter_weight, LV_ALIGN_CENTER, 10, 0);
+
+    // set up a state panel with information about the process
+    lv_obj_t *info_panel = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(info_panel, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_align(info_panel, LV_ALIGN_RIGHT_MID,-10,0);
+    lv_obj_set_layout(info_panel, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(info_panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_ver(info_panel, 5, 0);
+
+    state_label = lv_label_create(info_panel);
+    lv_obj_set_style_text_font(state_label, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(state_label, lv_color_hex3(0x000), LV_PART_MAIN | LV_STATE_DEFAULT); 
+
+    countdown_label = lv_label_create(info_panel);
+    lv_obj_set_style_text_font(countdown_label, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(countdown_label, lv_color_hex3(0x000), LV_PART_MAIN | LV_STATE_DEFAULT); 
+    lv_obj_add_flag(countdown_label, LV_OBJ_FLAG_HIDDEN);
 }

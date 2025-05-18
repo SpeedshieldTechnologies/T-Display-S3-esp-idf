@@ -69,7 +69,7 @@ void bsp_display_unlock(void);
 bool bsp_display_lock(uint32_t timeout_ms);
 
 
-
+void build_display();
 
 
 
